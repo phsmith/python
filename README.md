@@ -1,4 +1,4 @@
-python
+Python 
 ======
 
-Python scripts
+Python scripts and utilities
