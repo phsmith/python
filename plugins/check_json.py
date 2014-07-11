@@ -37,10 +37,7 @@ parser.add_option('-p', '--perfdata', dest='perfdata', action='store_true', help
 (option, args) = parser.parse_args()
 
 # Nagios status and messages
-ok       = (0, 'OK')
-warning  = (1, 'WARNING')
-critical = (2, 'CRITICAL')
-unknown  = (3, 'UNKNOW')
+nagios_status = ['OK', 'WARNING', 'CRITICAL', 'UNKNOW']
 
 filter   = option.filter
 request  = Request(option.url)
@@ -48,27 +45,22 @@ perfdata = option.perfdata
 textinfo = []
 
 def exit(status, message):
-    print 'JSON Status API %s - %s' % (status[1], message)
-    sys.exit(status[0])
+    print 'JSON Status API %s - %s' % (nagios_status[int(status)], message)
+    sys.exit(status)
 
-def output(message):
+def output(status, message):
     message_list = []
     perf = []
 
     for value in message:
         if re.search(filter, value, re.IGNORECASE):
-            if 'bytes' in value:
-                item = value.split(':')
-                mbits = int(item[1]) / 1024 / 1024 
-                value = '%s: %s' % (item[0].replace('bytes','mbits'), mbits)
-
             message_list.append(value)
             perf.append(value.replace(': ', '='))
 
     if not message_list:
-        exit(unknown, 'Invalid filter passed.')
-    
-    message = 'JSON Status API %s - %s' % (ok[1], ', '.join(message_list))
+        exit(3, 'No value information with the filter specified.')
+
+    message = 'JSON Status API %s - %s' % (nagios_status[int(status)], ', '.join(message_list))
 
     if perfdata: 
         return message + ' | ' + ';; '.join(perf)
@@ -76,19 +68,19 @@ def output(message):
         return message
 
 if not request:
-    exit(unknown, 'Missing command line arguments')
+    exit(3, 'Missing command line arguments')
 
 try:
     response = urlopen(request)
 except URLError as e:
-    exit(critical, 'Url request error. %s: %s' % (e.code, e.reason))
+    exit(3, 'Url request error. %s: %s' % (e.code, e.reason))
 except HTTPError as e:
-    exit(unknown, 'Invalid Uri. %s' % e.reason)
+    exit(3, 'Invalid Uri. %s' % e.reason)
 else:
     try:
-        json_response = json.loads(response.read())
+        json_response = json.loads(response.read().decode('iso-8859-1'))
     except Exception, e:
-        exit(critical, 'Invalid JSON response. %s' % e)
+        exit(3, 'Invalid JSON response. %s' % e)
 
 for level1, value in json_response.items():
     if isinstance(value, dict):
@@ -105,4 +97,4 @@ for level1, value in json_response.items():
     else:
         textinfo.append('%s: %s' % (level1, value))
 
-print output(textinfo)
+print output(0, textinfo)
