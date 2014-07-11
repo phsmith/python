@@ -4,6 +4,7 @@
 # Author:  Phillipe Smith <phillipelnx@gmail.com>
 # Date:    08/07/2014
 # License: GPL
+# Version: 1.1
 # 
 # The checks verifies a JSON url result and generates a Nagios compatible service with the results
 # 
@@ -16,6 +17,11 @@
 # Example of output gerenerated:
 #     $./check_json.py -u http://ntop.host.example/lua/host_get_json.lua?host=10.1.1.5 -f '^tcp'
 #      JSON Status API OK - tcp_sent.mbits: 132, tcp_sent.packets: 96155, tcp_rcvd.mbits: 5881, tcp_rcvd.packets: 85115809 | tcp_sent.mbits=132;; tcp_sent.packets=96155;; tcp_rcvd.mbits=5881;; tcp_rcvd.packets=85115809
+#
+# TODO:
+#     Remove the limit of 4 levels for JSON configuration tree
+#     Add Warning and Critical configuration
+#
 
 import json
 import sys
@@ -61,11 +67,13 @@ def output(message):
 
     if not message_list:
         exit(unknown, 'Invalid filter passed.')
+    
+    message = 'JSON Status API %s - %s' % (ok[1], ', '.join(message_list))
 
     if perfdata: 
-        return 'JSON Status API %s - %s | %s' % (ok[1], ', '.join(message_list), ';; '.join(perf))
+        return message + ' | ' + ';; '.join(perf)
     else:
-        return 'JSON Status API %s - %s' % (ok[1], ', '.join(message_list))
+        return message
 
 if not request:
     exit(unknown, 'Missing command line arguments')
@@ -73,7 +81,7 @@ if not request:
 try:
     response = urlopen(request)
 except URLError as e:
-    exit(critical, 'Url request returning: ' + e.code)
+    exit(critical, 'Url request error. %s: %s' % (e.code, e.reason))
 except HTTPError as e:
     exit(unknown, 'Invalid Uri. %s' % e.reason)
 else:
@@ -82,19 +90,19 @@ else:
     except Exception, e:
         exit(critical, 'Invalid JSON response. %s' % e)
 
-for key in json_response:
-    if isinstance(json_response[key], dict):
-        for value in json_response[key]:
-            if isinstance(json_response[key][value], dict):
-                for item in json_response[key][value]:
-                    if isinstance(json_response[key][value][item], dict):
-                        for subitem in json_response[key][value][item]:
-                            textinfo.append('%s.%s.%s.%s: %s' % (key, value, item, subitem, json_response[key][value][item][subitem]))
+for level1, value in json_response.items():
+    if isinstance(value, dict):
+        for level2, value in value.items():
+            if isinstance(value, dict):
+                for level3, value in value.items():
+                    if isinstance(value, dict):
+                        for level4, value in value.items():
+                            textinfo.append('%s.%s.%s.%s: %s' % (level1, level2, level3, level4, value))
                     else:
-                        textinfo.append('%s.%s.%s: %s' % (key, value, item, json_response[key][value][item]))
+                        textinfo.append('%s.%s.%s: %s' % (level1, level2, level3, value))
             else:
-                textinfo.append('%s.%s: %s' % (key, value, json_response[key][value]))
+                textinfo.append('%s.%s: %s' % (level1, level2, value))
     else:
-        textinfo.append('%s: %s' % (key, json_response[key]))
+        textinfo.append('%s: %s' % (level1, value))
 
 print output(textinfo)
