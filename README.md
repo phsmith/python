@@ -1,4 +1,4 @@
-nagios
+Nagios
 ======
 
 Nagios plugins
