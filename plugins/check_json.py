@@ -12,11 +12,11 @@
 #     -h  Help message
 #     -u  URL with JSON rsult
 #     -f  Regular expression for filter only determined results
-#     -p  Generates perfdata
+#     -p  Generates perfdata. Need 
 #
 # Example of output gerenerated:
-#     $./check_json.py -u http://ntop.host.example/lua/host_get_json.lua?host=10.1.1.5 -f '^tcp'
-#      JSON Status API OK - tcp_sent.mbits: 132, tcp_sent.packets: 96155, tcp_rcvd.mbits: 5881, tcp_rcvd.packets: 85115809 | tcp_sent.mbits=132;; tcp_sent.packets=96155;; tcp_rcvd.mbits=5881;; tcp_rcvd.packets=85115809
+#     $./check_json.py -u http://date.jsontest.com/
+#      JSON Status API OK - date: 07-12-2014, milliseconds_since_epoch: 1405126483908, time: 12:54:43 AM
 #
 # TODO:
 #     Remove the limit of 4 levels for JSON configuration tree
@@ -32,12 +32,17 @@ from urllib2 import urlopen, Request, URLError, HTTPError
 parser = OptionParser(usage='usage: %prog [ -u|--url http://json_result_url ] [ -f|--filter filter_expression ] [ -p|--perfdata ]')
 parser.add_option('-u', '--url', dest='url', help='JSON api url')
 parser.add_option('-f', '--filter', dest='filter', default='', help='Filter determined values. Ex.: "^tcp|^udp"')
-parser.add_option('-p', '--perfdata', dest='perfdata', action='store_true', help='Enable performance data')
+parser.add_option('-p', '--perfdata', dest='perfdata', default=False, help='Enable performance data. Must specify a expression with the values that going to be used as perfdata. If you want to show all values as perfdata put a "."')
 
 (option, args) = parser.parse_args()
 
 # Nagios status and messages
 nagios_status = ['OK', 'WARNING', 'CRITICAL', 'UNKNOW']
+
+filter   = option.filter
+perfdata = option.perfdata
+textinfo = []
+
 
 def exit(status, message):
     print 'JSON Status API %s - %s' % (nagios_status[int(status)], message)
@@ -50,14 +55,15 @@ def output(status, message):
     for value in message:
         if re.search(filter, value, re.IGNORECASE):
             message_list.append(value)
-            perf.append(value.replace(': ', '='))
+            if perfdata and re.search(perfdata, value):
+                perf.append(value.replace(': ', '='))
 
     if not message_list:
         exit(3, 'No value information with the filter specified.')
 
     message = 'JSON Status API %s - %s' % (nagios_status[int(status)], ', '.join(message_list))
 
-    if perfdata:
+    if perf:        
         return message + ' | ' + ';; '.join(perf)
     else:
         return message
@@ -65,12 +71,8 @@ def output(status, message):
 if not option.url:
     exit(3, 'Missing command line arguments')
 
-filter   = option.filter
-request  = Request(option.url)
-perfdata = option.perfdata
-textinfo = []
-
 try:
+    request  = Request(option.url)
     response = urlopen(request)
 except URLError as e:
     exit(3, 'Url request error. %s: %s' % (e.code, e.reason))
