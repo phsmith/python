@@ -48,11 +48,26 @@ def exit(status, message):
     print 'JSON Status API %s - %s' % (nagios_status[int(status)], message)
     sys.exit(status)
 
-def output(status, message):
+def output(data):
     message_list = []
     perf = []
 
-    for value in message:
+    for level1, value in data.items():
+        if isinstance(value, dict):
+            for level2, value in value.items():
+                if isinstance(value, dict):
+                    for level3, value in value.items():
+                        if isinstance(value, dict):
+                            for level4, value in value.items():
+                                textinfo.append('%s.%s.%s.%s: %s' % (level1, level2, level3, level4, value))
+                        else:
+                            textinfo.append('%s.%s.%s: %s' % (level1, level2, level3, value))
+                else:
+                    textinfo.append('%s.%s: %s' % (level1, level2, value))
+        else:
+            textinfo.append('%s: %s' % (level1, value))
+
+    for value in textinfo:        
         if re.search(filter, value, re.IGNORECASE):
             message_list.append(value)
             if perfdata and re.search(perfdata, value):
@@ -61,12 +76,14 @@ def output(status, message):
     if not message_list:
         exit(3, 'No value information with the filter specified.')
 
-    message = 'JSON Status API %s - %s' % (nagios_status[int(status)], ', '.join(message_list))
+    
+    message = ', '.join(message_list)
+    perf    = ';; '.join(perf)
 
-    if perf:        
-        return message + ' | ' + ';; '.join(perf)
-    else:
-        return message
+    if perf:                
+        return exit(0, message + ' | ' + perf)
+    else:        
+        return exit(0, message)
 
 if not option.url:
     exit(3, 'Missing command line arguments')
@@ -84,19 +101,9 @@ else:
     except Exception, e:
         exit(3, 'Invalid JSON response. %s' % e)
 
-for level1, value in json_response.items():
-    if isinstance(value, dict):
-        for level2, value in value.items():
-            if isinstance(value, dict):
-                for level3, value in value.items():
-                    if isinstance(value, dict):
-                        for level4, value in value.items():
-                            textinfo.append('%s.%s.%s.%s: %s' % (level1, level2, level3, level4, value))
-                    else:
-                        textinfo.append('%s.%s.%s: %s' % (level1, level2, level3, value))
-            else:
-                textinfo.append('%s.%s: %s' % (level1, level2, value))
-    else:
-        textinfo.append('%s: %s' % (level1, value))
+if isinstance(json_response, list):
+    for item in json_response:        
+        print output(item)
+else:
+    print output(json_response)
 
-print output(0, textinfo)
