@@ -5,9 +5,9 @@
 # Date:    08/07/2014
 # License: GPL
 # Version: 1.1
-# 
+#
 # The checks verifies a JSON url result and generates a Nagios compatible service with the results
-# 
+#
 # Check options:
 #     -h  Help message
 #     -u  URL with JSON rsult
@@ -29,7 +29,7 @@ import re
 from optparse import OptionParser
 from urllib2 import urlopen, Request, URLError, HTTPError
 
-parser = OptionParser(usage='usage: %prog -H hostname/ip [-f filter_expression]')
+parser = OptionParser(usage='usage: %prog [ -u|--url http://json_result_url ] [ -f|--filter filter_expression ] [ -p|--perfdata ]')
 parser.add_option('-u', '--url', dest='url', help='JSON api url')
 parser.add_option('-f', '--filter', dest='filter', default='', help='Filter determined values. Ex.: "^tcp|^udp"')
 parser.add_option('-p', '--perfdata', dest='perfdata', action='store_true', help='Enable performance data')
@@ -38,11 +38,6 @@ parser.add_option('-p', '--perfdata', dest='perfdata', action='store_true', help
 
 # Nagios status and messages
 nagios_status = ['OK', 'WARNING', 'CRITICAL', 'UNKNOW']
-
-filter   = option.filter
-request  = Request(option.url)
-perfdata = option.perfdata
-textinfo = []
 
 def exit(status, message):
     print 'JSON Status API %s - %s' % (nagios_status[int(status)], message)
@@ -62,13 +57,18 @@ def output(status, message):
 
     message = 'JSON Status API %s - %s' % (nagios_status[int(status)], ', '.join(message_list))
 
-    if perfdata: 
+    if perfdata:
         return message + ' | ' + ';; '.join(perf)
     else:
         return message
 
-if not request:
+if not option.url:
     exit(3, 'Missing command line arguments')
+
+filter   = option.filter
+request  = Request(option.url)
+perfdata = option.perfdata
+textinfo = []
 
 try:
     response = urlopen(request)
