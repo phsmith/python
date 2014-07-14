@@ -77,8 +77,8 @@ def output(data):
         exit(3, 'No value information with the filter specified.')
 
     
-    message = ', '.join(message_list)
-    perf    = ';; '.join(perf)
+    message = ', '.join(sorted(message_list))
+    perf    = ';; '.join(sorted(perf))
 
     if perf:                
         return exit(0, message + ' | ' + perf)
@@ -91,10 +91,10 @@ if not option.url:
 try:
     request  = Request(option.url)
     response = urlopen(request)
-except URLError as e:
-    exit(3, 'Url request error. %s: %s' % (e.code, e.reason))
-except HTTPError as e:
-    exit(3, 'Invalid Uri. %s' % e.reason)
+except URLError as err:
+    exit(3, 'Url request error. %s' % err)
+except HTTPError as err:
+    exit(3, 'Invalid Uri. %s' % err.reason)
 else:
     try:
         json_response = json.loads(response.read().decode('iso-8859-1'))
