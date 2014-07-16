@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 #
 # Author:  Phillipe Smith <phillipelnx@gmail.com>
 # Date:    08/07/2014
@@ -44,7 +44,7 @@ perfdata = option.perfdata
 sort     = option.sort
 
 def exit(status, message):
-    print 'JSON Status API %s - %s' % (nagios_status[int(status)], message.encode('iso-8859-1'))
+    print 'JSON Status API %s - %s' % (nagios_status[int(status)], message)
     sys.exit(status)
 
 def walk(data, levels = [], result = []):
