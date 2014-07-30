@@ -1,5 +1,4 @@
-Nagios
+Python
 ======
 
-Nagios plugins
-
+Python scripts and utilities
