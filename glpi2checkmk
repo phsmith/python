@@ -5,7 +5,7 @@
 # Description: Script to Add hosts from GLPI Database to Check_MK WATO hosts.mk
 #
 
-import sys, os, fileinput, subprocess, re
+import sys, os, pwd, fileinput, subprocess, re
 from optparse import OptionParser
 
 class glpi2checkmk:
@@ -13,38 +13,50 @@ class glpi2checkmk:
 
     livesocket = '/var/spool/nagios/cmd/live'
     watodir    = '/etc/check_mk/conf.d/wato/'
-    hostsmk    = watodir + 'hosts.mk'
 
     def __init__(self):
         ''' Set Check_MK WATO path and main WATO hosts.mk, and others variables to store data '''
         self.validate =  False
-        self.uid      =  48  # Apache user
-        self.gid      =  498 # Nagios group
+        self.gid = pwd.getpwnam('nagios').pw_gid
 
-        self.glpidb   =  { 'host': 'viper', 
-                           'db':   'glpi', 
-                           'user': 'root', 
-                           'pass': 'root' }
+        try:
+            self.uid = pwd.getpwnam('apache').pw_uid
+        except:
+            self.uid = pwd.getpwnam('www-data').pw_uid
+        else:
+            self.uid = 0
 
-        self.nagiosdb =  { 'host': 'localhost', 
-                           'db':   'nagios', 
-                           'user': 'root', 
-                           'pass': '' }
+        ''' Glpi database configuration '''
+        self.glpidb_config =  { 
+            'host'     : 'viper', 
+            'user'     : 'desktop', 
+            'password' : 'desktop',
+            'database' : 'glpi', 
+        }
+
+        ''' Nagios database configuration '''
+        self.nagiosdb_config = { 
+            'host'     : 'localhost', 
+            'user'     : 'root', 
+            'password' : '',
+            'database' : 'nagios', 
+        }
 
         ''' Options to parse to the script '''
         self.parser = OptionParser()
         self.parser.add_option('--debug', action='store_true', dest='debug', help='Debug mode (No write to files)')
         self.parser.add_option('-w', '--write', action='store_true', dest='writefile', help='Write the changes to the hosts.mk file')
-        self.parser.add_option('-u', '--update', action='store_true', dest='update', help='Update Nagios configuration')
-        self.parser.add_option('-o', '--only', dest='onlyhost', help='Select only hosts that starts with criteria. Ex.: glpi2checkmk -o CEDI (require --debug or -w)')
+        self.parser.add_option('-r', '--reload', action='store_true', dest='reload', help='Update/Reload Nagios configuration')
+        self.parser.add_option('-f', '--filter', dest='filter', help='Filter only hosts that starts with criteria. Ex.: glpi2cmk -f CEDI (require --debug or -w)')
         self.parser.add_option('-d', '--hostdir', dest='hostdir', help='Manually define the dir to add the new host(s). If the directory does nost exists, It will be created. (require --debug or -w)')
+        self.parser.add_option('-l', '--livesock', default=self.livesocket, dest='livesock', help='Livestatus socket path (ex.: "/var/spool/nagios/cmd/live") or address (ex.: "localhost:6557")')
         (self.option, self.parse) = self.parser.parse_args()
 
         if len(sys.argv) <= 1:
             sys.exit(self.parser.print_help())
 
         self.debug    = True if self.option.debug else False
-        self.onlyhost = self.option.onlyhost.upper() if self.option.onlyhost is not None else None
+        self.filter   = self.option.filter.upper() if self.option.filter is not None else None
         self.hostdir  = self.option.hostdir if self.option.hostdir is not None else False
         self.count    = 0
 
@@ -61,8 +73,8 @@ class glpi2checkmk:
             sys.exit('\nERROR: need mysql-connector-python to use MySQL Database.\n')
 
         ''' Setting databases connection variables '''
-        glpidb   = mysql.connector.connect( host=self.glpidb['host'],   user=self.glpidb['user'],   password=self.glpidb['pass'],   database=self.glpidb['db'] )
-        #nagiosdb = mysql.connector.connect( host=self.nagiosdb['host'], user=self.nagiosdb['user'], password=self.nagiosdb['pass'], database=self.nagiosdb['db'] )
+        glpidb   = mysql.connector.connect(**self.glpidb_config)
+        #nagiosdb = mysql.connector.connect(**self.nagiosdb_config)
 
         ''' Creating glpi database query '''
         sql = 'SELECT UPPER(name) FROM glpi_computers'
@@ -102,7 +114,7 @@ class glpi2checkmk:
                             if host in line:
                                 return file
             
-        return self.hostsmk
+        return self.watodir + 'hosts.mk'
 
     def add_to_file(self, host):
         ''' Add the glpi host to the hosts.mk file, determined by the method hostsfile() '''
@@ -143,16 +155,33 @@ class glpi2checkmk:
             else:
                sys.exit(self.parser.print_help())
 
-    def livestatus(self, query, socketpath = livesocket):
+    def livestatus(self, query):
         ''' Connect to Livestatus socket and send queries to that '''
         import socket
         
+        socketpath = self.option.livesock
+        sockettype = socket.AF_UNIX
+        livesock = []
+        
+        if ':' in socketpath:
+            host, port = socketpath.split(':')
+            socketpath = (host, int(port))
+            sockettype = socket.AF_INET
+
         try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)        
+            s = socket.socket(sockettype, socket.SOCK_STREAM)        
             s.connect(socketpath)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.send(query)
             s.shutdown(socket.SHUT_WR)
-            return s.recv(100000000)        
+            livesock = ''
+
+            while True:
+                data = s.recv(1)
+                if not data: break
+                livesock += data
+
+            return livesock.strip().split('\n')
         except socket.error as e:
             sys.exit(e)
 
@@ -163,16 +192,16 @@ class glpi2checkmk:
         print ''
         for host in self.datadiff():
             if '-' in host or '_' in host:
-                if self.onlyhost is None:
+                if self.filter is None:
                     self.add_to_file(host)
-                elif re.search(self.onlyhost, host):
+                elif re.search(self.filter, host):
                     self.add_to_file(host)
 
         ''' Update nagios configs with "cmk -O" if self.validate var is True and debg is False '''
         if self.validate:
             if not self.debug and self.option.writefile:
                 print ''
-                if self.option.update: 
+                if self.option.reload: 
                     subprocess.call(["cmk", "-O"])
             elif self.debug:
                 print '\n%d new hosts.\n' % self.count
@@ -182,7 +211,7 @@ class glpi2checkmk:
 if __name__ == '__main__':
     ''' Check if the script is running as root '''
     if os.getuid() is not 0:
-        sys.exit('\nERRO: O script deve ser executado como root.\n')
+        sys.exit('\nERROR: The script must be executed by root.\n')
     else:
         app = glpi2checkmk()
         app.run()
