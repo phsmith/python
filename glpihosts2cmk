@@ -1,0 +1,249 @@
+#!/usr/bin/python                                                                                                                                                                                              
+# -*- encoding: utf-8; py-indent-offset: 4 -*-
+# 
+# Author: Phillipe Smith <phillipe.chaves@camara.leg.br>
+# Description: Script to Add hosts from GLPI Database to Check_MK WATO
+#
+
+import sys, os, pwd, re, json
+from urllib import urlencode, quote
+from urllib2 import urlopen, Request
+from optparse import OptionParser
+
+class glpihosts2cmk:
+    ''' Class to verify and add hosts from GLPI database that aren't on Nagios/Check_MK '''
+    livesocket = '/var/spool/nagios/cmd/live'
+    watodir    = '/etc/check_mk/conf.d/wato/'
+
+    def __init__(self):
+        ''' Set the program options and configurations '''
+
+        ''' Determine the numeric gid from nagios group '''
+        self.gid = pwd.getpwnam('nagios').pw_gid
+
+        ''' Determine the numeric uid from apache user '''
+        try:
+             self.uid = pwd.getpwnam('apache').pw_uid
+        except:
+            self.uid = pwd.getpwnam('www-data').pw_uid
+        
+        ''' Glpi database configuration '''
+        self.glpidb_config =  { 
+            'host'     : 'viper', 
+            'user'     : 'desktop', 
+            'password' : 'desktop',
+            'database' : 'glpi', 
+        }
+
+        ''' Options to parse to the script '''
+        self.parser = OptionParser()
+        self.parser.add_option('--debug', action='store_true', dest='debug', help='Debug mode - no modifications will be applied.')
+        self.parser.add_option('-c', '--credentials', dest='credentials', help='Credentials config file for Check_MK WATO API access. Put user and pass each in separate lines.')
+        self.parser.add_option('-w', '--write', action='store_true', dest='write', help='Write the changes to Wato configuration files.')
+        self.parser.add_option('-r', '--reload', action='store_true', dest='reload', help='Update/Reload Nagios configuration.')
+        self.parser.add_option('-s', '--search', dest='search', help='Search only hosts or tags that starts with criteria (accept regex). Ex.: glpihosts2cmk --debug -s cedi (require --debug or -w)')
+        self.parser.add_option('-f', '--folder', dest='folder', help='Manually define the folder to add the new host(s). If the folder does nost exists, it will be created. (require -w)')
+        self.parser.add_option('-l', '--livesock', default=self.livesocket, dest='livesock', help='Livestatus socket path (ex.: "/var/spool/nagios/cmd/live") or address (ex.: "localhost:6557")')
+        self.parser.add_option('-u', '--user', default='', dest='cmk_api_user', help='User to access Check_MK WATO API.')
+        self.parser.add_option('-p', '--passwd', default='', dest='cmk_api_passwd', help='Password of the Check_MK WATO API user.')
+        (self.option, self.parse) = self.parser.parse_args()
+
+        if len(sys.argv) <= 1:
+            sys.exit(self.parser.print_help())
+
+        self.option.debug    = True if self.option.debug else False
+        self.option.search   = self.option.search.upper() if self.option.search is not None else None
+        self.option.folder   = self.option.folder if self.option.folder is not None else False
+        self.cmk_api_auth    = {'user': '', 'pass': ''}
+        self.hostsinfo       = {'new': [], 'edited': []}
+
+        if self.option.credentials:
+            config = open(self.option.credentials).read().split()
+            self.cmk_api_auth = {'user': config[0], 'pass': config[1]}
+        else:
+            self.cmk_api_auth = {'user': self.option.cmk_api_user, 'pass': self.option.cmk_api_passwd}
+
+    def hostsdata(self):
+        ''' Connect to glpi and nagios databases to generate a list with hosts that are on glpi and not on check_mk '''
+        ''' Trying import python mysql module '''
+        try:
+            import mysql.connector
+        except Exception, e:
+            sys.exit('\nERROR: need mysql-connector-python to use MySQL Database.\n')
+
+        ''' Setting databases connection settings '''
+        glpidb = mysql.connector.connect(**self.glpidb_config)
+
+        ''' Creating glpi database query '''
+        sql = 'SELECT nagios_tag, UPPER(nagios_host), dt_exec FROM desktop_software_use;'
+        glpicursor = glpidb.cursor()
+        glpicursor.execute(sql)
+
+        ''' Getting host names and their associated tags from livestatus and store the result on hostscmk list'''
+        query    = 'GET hosts\nColumns: name custom_variable_values\n'
+        hostscmk = self.livestatus(query)
+        
+        ''' Store all hosts found on glpi database in hostsglpi list '''
+        hostsglpi = glpicursor.fetchall()
+
+        ''' Set/Update hosts atrributes '''
+        hosttags = {}
+        for info in hostsglpi:
+            tags = info[0].encode('utf-8')
+            hostname = info[1].encode('utf-8')
+
+            if hosttags.has_key(hostname):
+                hosttags[hostname].append(tags)
+            else:
+                hosttags.update({hostname: [tags]})
+
+        ''' Generate a list with the difference from glpi and check_mk hosts '''
+        self.hostsdiff = sorted(list(set([y[1] for y in hostsglpi]) - set([x.split(';')[0] for x in hostscmk])))
+
+        ''' Return the hosts and their attributes '''
+        return hosttags.items()
+
+    def hostfolder(self, host):
+        ''' Determine which file that the host came from glpi must be added in '''
+        for dir in os.listdir(self.watodir):
+            if not '.' in dir:
+                file = self.watodir + dir + '/hosts.mk'
+                if os.path.exists(file):
+                    with open(file) as f:
+                        for line in f:
+                            if host in line:
+                                return dir
+
+        return '/'
+
+    def livestatus(self, query):        
+        ''' Connect to Livestatus socket and send queries to that '''
+        import socket
+        
+        socketpath = self.option.livesock
+        sockettype = socket.AF_UNIX
+        livesock = []
+        
+        if ':' in socketpath:
+            host, port = socketpath.split(':')
+            socketpath = (host, int(port))
+            sockettype = socket.AF_INET
+        
+        try:
+            s = socket.socket(sockettype, socket.SOCK_STREAM)        
+            s.connect(socketpath)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.send(query)
+            s.shutdown(socket.SHUT_WR)
+            livesock = ''
+
+            while True:
+                data = s.recv(1)
+                if not data: break
+                livesock += data
+
+            return livesock.strip().split('\n')
+        except socket.error as e:
+            sys.exit(e)
+
+    def hostattributes(self, host, action, params={}, server='localhost'):
+        ''' Make use of Check_MK 1.2.6+ WebApi to get, add and edit hosts and their attributes '''
+        params.update({ 'hostname': '%s' % host})
+        request = 'request=%s' % quote(json.dumps(params))
+
+        if not self.cmk_api_auth['user'] and not self.cmk_api_auth['pass']:
+            raise ValueError('No credentials specified to access Check_MK WATO API.')
+
+        url     = 'http://%s/check_mk/webapi.py?action=%s&_username=%s&_secret=%s&%s' % (server, action, self.cmk_api_auth['user'], self.cmk_api_auth['pass'], request)
+
+        if action == 'get_host':
+            url += '&effective_attributes=1'
+        elif action == 'discover_services':
+            url += '&mode=fixall'
+        elif action == 'activate_changes':
+            url += '&allow_foreign_changes=1'
+
+        try:
+            response = urlopen(url).read()
+        except Exception, e:
+            sys.stderr.write('ERROR: %s\n' % e)
+            return []
+
+        try:
+            obj = json.loads(response)
+        except Exception, e:
+            sys.stderr.write('ERROR: Invalid json code (%s)\n' % e)
+
+        return obj['result']
+
+
+    def check_mk_update(self, host, tags):
+        hostattributes = self.hostattributes(host, 'get_host')
+        folder         = self.option.folder if self.option.folder else self.hostfolder(host)
+
+        if 'not exist' in hostattributes:
+            self.hostsinfo['new'].append(host)
+            attributes = {
+                'attributes': {
+                    'tag_agent'      : 'cmk-agent', 
+                    'tag_networking' : 'lan',
+                    'tag_criticality': 'prod',
+                    'tag_dyndns'     : 'dyndns', 
+                    'tag_units'      : host.split('-')[0].lower(),
+                }, 
+                'folder': folder,
+            }
+
+            for tag in tags:
+                attributes['attributes'].update({'tag_%s' % tag: tag})
+
+            newtags = sorted(attributes.get('attributes', {}).values())
+            if self.option.debug:
+                print "(DEBUG):\n  HOST: %s [ADD]\n  TAGS: %s\n" % (host, newtags)
+            elif self.option.write:
+                self.hostattributes(host, 'add_host', attributes)
+                self.hostattributes(host, 'discover_services')
+                print '> Added host %s to Check_MK.' % host
+
+        else:
+            attributes = {'attributes': {}}
+            for tag in tags:
+                if tag not in hostattributes['attributes'].values():
+                    if not host in self.hostsinfo['edited']: 
+                        self.hostsinfo['edited'].append(host) 
+                    attributes['attributes'].update({'tag_%s' % tag: tag})
+
+            newtags = sorted(attributes.get('attributes', {}).values())
+            if newtags:
+                if self.option.debug:
+                    print "(DEBUG):\n  HOST: %s [EDIT]\n  TAGS: %s\n" % (host, newtags)
+                elif self.option.write:
+                    self.hostattributes(host, 'edit_host', attributes)
+                    print '> Edited host %s.\n>> Added new tags: %s' % (host, newtags)
+
+        if self.option.reload:
+            self.hostattributes(host, 'activate_changes')
+
+    def run(self):
+        ''' Execute all the routines to check and add hosts from glpi database to check_mk wato '''
+        for host, tags in self.hostsdata():
+            if '-' in host or '_' in host:
+                if self.option.search is None:
+                    self.check_mk_update(host, tags)
+                elif re.search(self.option.search, host) or self.option.search.lower() in str(tags):
+                    self.check_mk_update(host, tags)
+        
+        if self.option.debug:
+            print '-' * 30 + '\nTotal of new hosts:    %d\nTotal of edited hosts: %d\n' % (len(self.hostsinfo['new']), len(self.hostsinfo['edited']))
+       
+
+if __name__ == '__main__':
+    ''' Create the glpihosts2cmk object and call run method'''
+    try: 
+        app = glpihosts2cmk()
+        app.run()
+
+    except (KeyboardInterrupt):
+        print "\n\nCtrl+C was pressed. Program interrupted!\n"
+
+
