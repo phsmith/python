@@ -3,6 +3,9 @@
 # 
 # Author: Phillipe Smith <phillipelnx@gmail.com>
 # Description: Script to Add hosts from GLPI Database to Check_MK WATO hosts.mk
+#             The glpi database table used here is customized and specific
+#             so, you must modify it to the default glpi_computers table
+#             or other that attends to your requisites.
 #
 
 import sys, os, pwd, fileinput, subprocess, re
@@ -16,16 +19,7 @@ class glpi2checkmk:
 
     def __init__(self):
         ''' Set Check_MK WATO path and main WATO hosts.mk, and others variables to store data '''
-        self.validate =  False
-        self.gid = pwd.getpwnam('nagios').pw_gid
-
-        try:
-            self.uid = pwd.getpwnam('apache').pw_uid
-        except:
-            self.uid = pwd.getpwnam('www-data').pw_uid
-        else:
-            self.uid = 0
-
+        
         ''' Glpi database configuration '''
         self.glpidb_config =  { 
             'host'     : 'viper', 
@@ -58,7 +52,17 @@ class glpi2checkmk:
         self.debug    = True if self.option.debug else False
         self.filter   = self.option.filter.upper() if self.option.filter is not None else None
         self.hostdir  = self.option.hostdir if self.option.hostdir is not None else False
+        self.livesock = self.option.livesock
         self.count    = 0
+        self.validate =  False
+        self.gid      = pwd.getpwnam('nagios').pw_gid
+
+        try:
+            self.uid = pwd.getpwnam('apache').pw_uid
+        except:
+            self.uid = pwd.getpwnam('www-data').pw_uid
+        else:
+            self.uid = 0
 
     def datadiff(self):
         ''' Connect to glpi and nagios databases to generate a list with hosts that are on glpi and not on check_mk '''

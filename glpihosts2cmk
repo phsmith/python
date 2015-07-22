@@ -3,6 +3,9 @@
 # 
 # Author: Phillipe Smith <phillipe.chaves@camara.leg.br>
 # Description: Script to Add hosts from GLPI Database to Check_MK WATO
+#             The glpi database table used here is customized and specific
+#             so, you must modify it to the default glpi_computers table
+#             or other that attends to your requisites.
 #
 
 import sys, os, pwd, re, json
@@ -17,15 +20,6 @@ class glpihosts2cmk:
 
     def __init__(self):
         ''' Set the program options and configurations '''
-
-        ''' Determine the numeric gid from nagios group '''
-        self.gid = pwd.getpwnam('nagios').pw_gid
-
-        ''' Determine the numeric uid from apache user '''
-        try:
-             self.uid = pwd.getpwnam('apache').pw_uid
-        except:
-            self.uid = pwd.getpwnam('www-data').pw_uid
         
         ''' Glpi database configuration '''
         self.glpidb_config =  { 
@@ -63,6 +57,15 @@ class glpihosts2cmk:
         else:
             self.cmk_api_auth = {'user': self.option.cmk_api_user, 'pass': self.option.cmk_api_passwd}
 
+        ''' Determine the numeric gid from nagios group '''
+        self.gid = pwd.getpwnam('nagios').pw_gid
+
+        ''' Determine the numeric uid from apache user '''
+        try:
+             self.uid = pwd.getpwnam('apache').pw_uid
+        except:
+            self.uid = pwd.getpwnam('www-data').pw_uid
+        
     def hostsdata(self):
         ''' Connect to glpi and nagios databases to generate a list with hosts that are on glpi and not on check_mk '''
         ''' Trying import python mysql module '''
@@ -75,6 +78,7 @@ class glpihosts2cmk:
         glpidb = mysql.connector.connect(**self.glpidb_config)
 
         ''' Creating glpi database query '''
+        #sql = 'SELECT UPPER(name) FROM glpi_computers;'
         sql = 'SELECT nagios_tag, UPPER(nagios_host), dt_exec FROM desktop_software_use;'
         glpicursor = glpidb.cursor()
         glpicursor.execute(sql)
