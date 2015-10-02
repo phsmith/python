@@ -1,7 +1,7 @@
 #!/usr/bin/python                                                                                                                                                                                              
 # -*- encoding: utf-8; py-indent-offset: 4 -*-
 # 
-# Author: Phillipe Smith <phillipe.chaves@camara.leg.br>
+# Author: Phillipe Smith <phillipelnx@gmail.com>
 # Description: Script to Add hosts from GLPI Database to Check_MK WATO
 #             The glpi database table used here is customized and specific
 #             so, you must modify it to the default glpi_computers table
