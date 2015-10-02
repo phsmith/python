@@ -28,14 +28,6 @@ class glpi2checkmk:
             'database' : 'glpi', 
         }
 
-        ''' Nagios database configuration '''
-        self.nagiosdb_config = { 
-            'host'     : 'localhost', 
-            'user'     : 'root', 
-            'password' : '',
-            'database' : 'nagios', 
-        }
-
         ''' Options to parse to the script '''
         self.parser = OptionParser()
         self.parser.add_option('--debug', action='store_true', dest='debug', help='Debug mode (No write to files)')
@@ -78,26 +70,15 @@ class glpi2checkmk:
 
         ''' Setting databases connection variables '''
         glpidb   = mysql.connector.connect(**self.glpidb_config)
-        #nagiosdb = mysql.connector.connect(**self.nagiosdb_config)
-
+        
         ''' Creating glpi database query '''
         sql = 'SELECT UPPER(name) FROM glpi_computers'
         glpicursor = glpidb.cursor()
         glpicursor.execute(sql)
 
-        #''' Creating nagios database query '''
-        #sql = 'SELECT UPPER(display_name) FROM nagios_hosts'
-        #nagioscursor = nagiosdb.cursor()
-        #nagioscursor.execute(sql)
-        
         ''' Getting host names from livestatus and store the result on hostscmk list'''
         query    = 'GET hosts\nColumns: name\n'
         hostscmk = self.livestatus(query).strip().split('\n')
-
-        #''' Store all hosts found on nagios database on hostscmk list '''
-        #for host in nagioscursor.fetchall():
-        #    hostname = host[0].encode('utf-8')
-        #    hostscmk.append(hostname)
 
         ''' Store all hosts found on glpi database on hostsglpi list '''
         for host in glpicursor.fetchall():
