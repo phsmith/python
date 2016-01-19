@@ -3,7 +3,7 @@
 #
 # Author: Phillipe Smith <phillipelnx@gmail.com>
 # Description: Simple Python Hangman 
-# Version: 1.2
+# Version: 1.3
 
 import os, sys
 from urllib.request import Request, urlopen
@@ -31,6 +31,8 @@ class Hangman:
         64, # Body
         50, # Head
     ]
+    
+    wordlist_url = 'http://alcor.concordia.ca/~vjorge/Palavras-Cruzadas/Lista-de-Palavras.txt'
 
     def __init__(self):
         self.errors  = 0
@@ -38,13 +40,13 @@ class Hangman:
         
         try:
             print('   JOGO DA FORCA\n====================\n')
-            print('Aguarde....\nBuscando lista de palavras no endereço:\nhttp://www.ime.usp.br/~pf/algoritmos/dicios/br .....')
-            sleep(5)            
-            self.wordlist = urlopen('http://www.ime.usp.br/~pf/algoritmos/dicios/br')
+            print('Aguarde....\nBuscando lista de palavras no endereço:\n%s .....' % self.wordlist_url)
+            sleep(2)            
+            self.wordlist = urlopen(self.wordlist_url)
         except HTTPError as e:
-            sys.exit('\nO servidor não conseguiu atender a solicitação.\nCódigo do Erro: %d' % e.code)          
+            sys.exit('\nO servidor não conseguiu atender a solicitação...\n%s\n' % e)
         except URLError as e:
-            sys.exit('\nFalha ao contactar o servidor.\nCausa: %s' % e.reason)          
+            sys.exit('\nFalha ao contactar o servidor.\n%s\n' % e)
         else:
             self.wordlist = self.wordlist.read().decode('iso-8859-1').split()
     
@@ -59,7 +61,7 @@ class Hangman:
             self.draw()
     
     def kick(self, chars):
-        kick = input('Chute uma letra [ 0 = sair ]: ')
+        kick = input('Chute uma letra [ 0 = sair ]: ').upper()
 
         if kick == '0': sys.exit('\nObrigado por jogar!\n')
         
@@ -71,7 +73,7 @@ class Hangman:
                         self.word[i] = kick             
             else:
                 print('Não há a letra "%s" na palavra... Tente outra...' % kick)
-                sleep(5)
+                sleep(2)
                 self.wrong += kick
                 return kick                     
 
@@ -106,7 +108,7 @@ class Hangman:
             self.win_or_loose()
 
     def again(self):
-        play_again  = input('Deseja jogar novamente [s ou n]: ')
+        play_again  = input('Deseja jogar novamente [s ou n]: ').lower()
         self.points = '[ Acertos: %s - Erros: %s ]' % (self.hits, self.errors)
         
         if play_again and play_again[0].lower() == 's':
