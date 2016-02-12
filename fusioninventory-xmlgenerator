@@ -5,7 +5,7 @@
 # Description: Script to generate a xml file for fusioninventory based on snmpwalk -OQ ... and/or dmidecode file
 #
 
-import sys, os
+import sys, os, re
 from datetime import date, datetime
 from optparse import OptionParser
 
@@ -72,25 +72,55 @@ skunumber, smanufacturer, smodel, sserial = '', '', '', ''
 
 if dmifile:
     with open(dmifile) as dmifile:
-        count = 0
+        count    = 0
+        nextline = ''
+
         for line in dmifile:
             line = line.strip()
             if 'BIOS Information' in line:
                 for i in range(3):
                     biosinfo.append(next(dmifile).split(':')[1].strip())
                 bmanufacturer, bversion, bdate = biosinfo[0], biosinfo[1], biosinfo[2]
+            elif 'Handle 0x0000, DMI type 0' in line and 'Header and Data' in next(dmifile):
+                nextline = next(dmifile)
+                while not 'Handle' in nextline:
+                    nextline = next(dmifile).strip().replace(' ','')
+                    if '"' in nextline:
+                        biosinfo.append(nextline.strip('"'))
+                bmanufacturer, bversion, bdate = biosinfo[0], biosinfo[2], biosinfo[4]
             if 'System Information' in line:
                 for i in range(8):
                     sysinfo.append(next(dmifile).split(':')[1].strip())
                 smanufacturer, smodel, sserial, skunumber, uuid = sysinfo[0], sysinfo[1], sysinfo[3], sysinfo[6], sysinfo[4]
+            elif 'Handle0x0100,DMItype1' in nextline and 'Header and Data' in next(dmifile):
+                nextline = next(dmifile)
+                while not 'Handle' in nextline:
+                    nextline = next(dmifile).strip().replace(' ','')
+                    if '"' in nextline: 
+                        sysinfo.append(nextline.strip('"'))
+                smanufacturer, smodel, sserial, skunumber, uuid = sysinfo[0], sysinfo[2], sysinfo[4], sysinfo[3], sysinfo[1]
             if 'Base Board Information' in line:
                 for i in range(4):
                     mboardinfo.append(next(dmifile).split(':')[1].strip())
                 mmanufacturer, mmodel, mserial = mboardinfo[0], mboardinfo[1], mboardinfo[3]
+            elif 'Handle0x0200,DMItype2' in nextline and 'Header and Data' in next(dmifile):
+                nextline = next(dmifile)
+                while not 'Handle' in nextline:
+                    nextline = next(dmifile).strip().replace(' ','')
+                    if '"' in nextline:
+                        mboardinfo.append(nextline.strip('"'))
+                mmanufacturer, mmodel, mserial = mboardinfo[0], mboardinfo[2], mboardinfo[4]
             if 'Chassis Information' in line:
                 for i in range(14):
                     chassisinfo.append(next(dmifile).split(':')[1].strip())
                 chmanufacturer, chtype, chserial, chassettag = chassisinfo[0], chassisinfo[1], chassisinfo[4], chassisinfo[5]
+            elif 'Handle0x0300,DMItype3' in nextline and 'Header and Data' in next(dmifile):
+                nextline = next(dmifile)
+                while not 'Handle' in nextline:
+                    nextline = next(dmifile).strip().replace(' ','')
+                    if '"' in nextline:
+                        chassisinfo.append(nextline.strip('"'))
+                chmanufacturer, chtype, chserial, chassettag = chassisinfo[0], chassisinfo[1], chassisinfo[2], chassisinfo[3]
             if 'Memory Device' in line:
                 memoriesinfo[count] = []
                 for i in range(16):
@@ -108,9 +138,33 @@ if dmifile:
                         nextlinevalue = nextline.strip().split(': ')
                         key   = nextlinevalue[0].lower().replace(' ', '')
                         value = nextlinevalue[1] if len(nextlinevalue) > 1 else ''
+                        if value.startswith('CPU'):
+                            processorn += 1
                         cpusinfo[count].update({key: value})
                     nextline = next(dmifile)
-        
+            elif 'DMItype4,' in nextline and 'Header and Data' in next(dmifile):
+                nextline = next(dmifile)
+                cpuinfo  = []
+                while not 'DMI type 7,' in nextline:
+                    nextline = next(dmifile).strip()
+                    if '"' in nextline:
+                        nextline = nextline.strip('"')
+                        if nextline.startswith('CPU'):
+                            processorn += 1
+                        else:
+                            if not nextline in cpuinfo:
+                                cpuinfo.append(nextline)
+                            else:
+                                cpusinfo[count] = {} 
+                                info = [x for x in cpuinfo[1].split(' ') if x is not '']
+                                cpusinfo[count].update({
+                                    'manufacturer':  cpuinfo[0],
+                                    'family': info[1].strip('(R)'),
+                                    'externalclock': info[5],
+                                    'version': cpuinfo[1],
+                                    'currentspeed': str(float(info[5].strip('GHz')) * 1000) + ' ' ,
+                                })
+                                count += 1
         dmifile.close()
 
 # Generate XML BIOS informations 
@@ -151,18 +205,24 @@ for line in oidfile:
             oscomments = ''
     if 'sysName' in mib:
         name = value
-    if 'hrDeviceDescr.7' in mib:
-        devname     = value.split(': ')[1]
-        info        = devname.split(' ')
-        processorn += 1
-        processort  = devname
-        processors  = str(int(float(info[16].replace('GHz','')) * 1000))
-        if not dmifile:
-            cpus = SubElement(content, 'CPUS')
-            SubElement(cpus, 'FAMILYNAME').text  = info[1].replace('(R)', '')
-            SubElement(cpus, 'MANUFACTURER').text  = info[0].replace('(R)', '')
-            SubElement(cpus, 'NAME').text  = devname
-            SubElement(cpus, 'SPEED').text  = processors
+    if 'hrDeviceDescr' in mib:
+        if 'CPU' in value:
+            if len(value.split()) > 7: 
+                devname = ' '.join(value.split()[3:]) 
+            else: 
+                devname = ' '.join(value.split()[1:])
+            #devname     = value.split(': ')[1]
+            info        = [x for x in devname.split(' ') if x != '']
+            processort  = devname
+            processors  = str(int(float(info[-1].replace('GHz','').replace('GH','')) * 1000))
+            if processorn == 0:
+                processorn += 1
+            if not dmifile or cpusinfo.values()[0].get('family', '') == 'Unknown':
+                cpus = SubElement(content, 'CPUS')
+                SubElement(cpus, 'FAMILYNAME').text  = info[1].replace('(R)', '')
+                SubElement(cpus, 'MANUFACTURER').text  = info[0].replace('(R)', '')
+                SubElement(cpus, 'NAME').text  = devname
+                SubElement(cpus, 'SPEED').text  = processors
     if 'hrMemorySize' in mib:
         memory = value.split(' ')[0]
     if 'hrStorageDesc' in mib:
@@ -202,14 +262,14 @@ for line in oidfile:
     if 'ifDescr' in mib:
         key = index[1]
         ifInfo[key] = {'descr': value}
-    if 'ipAdEntIfIndex' in mib:
+    if 'ipAdEntIfIndex' in mib and not 'No Such Object available' in value:
         index = value
         if index in ipaddr:
             ipaddr[index] += ', ' + mib.split('ipAdEntIfIndex.')[1]
         else:
             ipaddr[index] = mib.split('ipAdEntIfIndex.')[1]
         ifInfo[index].update({'ipaddr': ipaddr[index]})
-    if 'ipAdEntNetMask' in mib:
+    if 'ipAdEntNetMask' in mib and not 'No Such Object available' in value:
         ipaddr = mib.split('ipAdEntNetMask.')[1]        
         key = [ key for key,items in ifInfo.iteritems() if items.get('ipaddr') != None and ipaddr in items.get('ipaddr') ][0]
         if key in netmask:
@@ -274,7 +334,7 @@ for info in cpusinfo.values():
     currentspeed  = info['currentspeed'].split(' ')[0] if 'currentspeed' in info else ''
     stepping      = info['signature'].split(', ')[3].split(' ')[1] if 'signature' in info else ''
 
-    if manufacturer != 'Not Specified':
+    if manufacturer != 'Not Specified' and familyname != 'Unknown':
         cpus = SubElement(content, 'CPUS')
         SubElement(cpus, 'CORE')
         SubElement(cpus, 'EXTERNAL_CLOCK').text = externalclock
@@ -342,24 +402,38 @@ for key, info in hrStorage.iteritems():
 
 # Generate XML SOFTWARES information
 for software in hrSWInstalled:
-    fscount  = software.count('-') # Count Field Separator
-    software = software.split('-')
-    
-    if fscount == 6:
-        swname = '-'.join(software[0:5])
-        swver  = '-'.join(software[6:])
-    elif fscount == 5:
-        swname = '-'.join(software[0:4])
-        swver  = '-'.join(software[5:])
-    elif fscount == 4:
-        swname = '-'.join(software[0:3])
-        swver  = '-'.join(software[4:])
-    elif fscount == 3:
-        swname = '-'.join(software[0:2])
-        swver  = '-'.join(software[3:])
+    if 'vmware' in osname.lower():
+        fscount  = software.count(',') # Count Field Separator
+        software = software.split(',')
+
+        if 'SUSE LINUX Products GmbH' in software:
+            swname = software[3]
+            swver  = '-'.join(software[4:])
+        elif len(software[:-2]) == 3:            
+            swname = software[2]
+            swver  = '-'.join(software[-2:])
+        else:
+            swname = software[1]
+            swver  = '-'.join(software[-1:])
     else:
-        swname = software[0]
-        swver  = '-'.join(software[1:])
+        fscount  = software.count('-') # Count Field Separator
+        software = software.split('-')
+        
+        if fscount == 6:
+            swname = '-'.join(software[0:5])
+            swver  = '-'.join(software[6:])
+        elif fscount == 5:
+            swname = '-'.join(software[0:4])
+            swver  = '-'.join(software[5:])
+        elif fscount == 4:
+            swname = '-'.join(software[0:3])
+            swver  = '-'.join(software[4:])
+        elif fscount == 3:
+            swname = '-'.join(software[0:2])
+            swver  = '-'.join(software[3:])
+        else:
+            swname = software[0]
+            swver  = '-'.join(software[1:])
      
     softwares = SubElement(content, 'SOFTWARES')
     SubElement(softwares, 'ARCH')
@@ -367,7 +441,7 @@ for software in hrSWInstalled:
     SubElement(softwares, 'FILESIZE')
     SubElement(softwares, 'FROM')
     SubElement(softwares, 'NAME').text = swname
-    SubElement(softwares, 'VERSION').text = swver
+    SubElement(softwares, 'VERSION').text = swver.strip('.-')
 
 # Generate XML final tags
 SubElement(content, 'VERSIONCLIENT').text = 'FusionInventory-Agent_v2.2.7'
