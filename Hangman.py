@@ -31,30 +31,41 @@ class Hangman:
         64, # Body
         50, # Head
     ]
-    
+
     wordlist_url = 'http://alcor.concordia.ca/~vjorge/Palavras-Cruzadas/Lista-de-Palavras.txt'
 
     def __init__(self):
         self.errors  = 0
         self.hits    = 0
-        
+        self.wordlist_file = '/tmp/wordlist.txt'
+
         try:
-            print('   JOGO DA FORCA\n====================\n')
-            print('Aguarde....\nBuscando lista de palavras no endereço:\n%s .....' % self.wordlist_url)
-            sleep(2)            
-            self.wordlist = urlopen(self.wordlist_url)
-        except HTTPError as e:
-            sys.exit('\nO servidor não conseguiu atender a solicitação...\n%s\n' % e)
-        except URLError as e:
-            sys.exit('\nFalha ao contactar o servidor.\n%s\n' % e)
-        else:
-            self.wordlist = self.wordlist.read().decode('iso-8859-1').split()
+            self.wordlist = open(self.wordlist_file, 'r').read()
+        except Exception as e:        
+            try:
+                print('   JOGO DA FORCA\n====================\n')
+                print('Aguarde....\nBuscando lista de palavras no endereço:\n%s .....' % self.wordlist_url)
+                sleep(2)
+                self.wordlist = urlopen(self.wordlist_url)
+            except HTTPError as e:
+                sys.exit('\nO servidor não conseguiu atender a solicitação...\n%s\n' % e)
+            except URLError as e:
+                sys.exit('\nFalha ao contactar o servidor...\n%s\n' % e)          
+            else:
+                self.wordlist = self.wordlist.read().decode('iso-8859-1')
+
+                # Write to file 
+                fh = open(self.wordlist_file, 'w')
+                fh.write(str(self.wordlist))
+                fh.close()
+        finally:
+            self.wordlist = self.wordlist.split()
     
     def play(self):
         self.correct = ''
-        self.wrong   = ''       
+        self.wrong   = ''      
         self.sorted_word = self.wordlist[randint(0, len(self.wordlist))]
-        self.word = ['_'] * (len(self.sorted_word))
+        self.word = ['_'] * len(self.sorted_word)
                 
         while len(self.wrong) <= len(self.doll):
             os.system('cls') if sys.platform.find('win') > -1 else os.system('clear') 
@@ -68,16 +79,18 @@ class Hangman:
         if kick.isalpha() and len(kick) == 1 and kick not in chars:
             if kick in self.sorted_word:                    
                 self.correct += kick        
-                for i in range(len(self.sorted_word)):                              
-                    if kick == self.sorted_word[i]: 
-                        self.word[i] = kick             
+                for i in range(len(self.sorted_word)):
+                    if '-' == self.sorted_word[i]:
+                        self.word[i] = '-'
+                    if kick == self.sorted_word[i]:
+                        self.word[i] = kick
             else:
                 print('Não há a letra "%s" na palavra... Tente outra...' % kick)
                 sleep(2)
                 self.wrong += kick
                 return kick                     
 
-    def win_or_loose(self):
+    def result(self):
         if ''.join(self.word) == self.sorted_word:
             self.hits += 1
             print('Você acertou! Parabéns!\n')          
@@ -105,7 +118,7 @@ class Hangman:
             print('   JOGO DA FORCA\t%s\n%s\n%s' % (draw_points, draw_header, draw_picture))            
             print('Chutes: %s\nPalavra: %s\n' % (' '.join(self.kicks), ' '.join(self.word)))
 
-            self.win_or_loose()
+            self.result()
 
     def again(self):
         play_again  = input('Deseja jogar novamente [s ou n]: ').lower()
