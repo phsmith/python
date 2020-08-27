@@ -210,35 +210,33 @@ for line in oidfile:
     if 'sysName' in mib:
         name = value
     if 'hrDeviceDescr' in mib:
-        if 'CPU' in value or 'Unknown Processor Type' in value:
+        if processorn == 0:
+            processorn += 1
+
+        if 'Unknown Processor Type' in value:
+            processors = value
+            processort  = 'Unknown'
+            cpus = SubElement(content, 'CPUS')
+            SubElement(cpus, 'FAMILYNAME').text  = 'Unknown'
+            SubElement(cpus, 'MANUFACTURER').text  = 'Unknown'
+            SubElement(cpus, 'NAME').text  = processors
+            SubElement(cpus, 'SPEED').text  = 'Unknown'
+        elif 'CPU' in value:
             if len(value.split()) > 7:
                 devname = ' '.join(value.split()[3:])
             else:
                 devname = ' '.join(value.split()[1:])
 
             info        = [x for x in devname.split(' ') if x != '']
+            processort  = devname
+            processors  = str(int(float(info[-1].replace('GHz','').replace('GH','')) * 1000))
 
-            if processorn == 0:
-                processorn += 1
-
-            if 'Unknown Processor Type' in value:
-                processors = value
-                processort  = 'Unknown'
+            if not dmifile or cpusinfo.values()[0].get('family', '') == 'Unknown':
                 cpus = SubElement(content, 'CPUS')
-                SubElement(cpus, 'FAMILYNAME').text  = 'Unknown'
-                SubElement(cpus, 'MANUFACTURER').text  = 'Unknown'
-                SubElement(cpus, 'NAME').text  = processors
-                SubElement(cpus, 'SPEED').text  = 'Unknown'
-            else:
-                processors  = str(int(float(info[-1].replace('GHz','').replace('GH','')) * 1000))
-                processort  = devname
-
-                if not dmifile or cpusinfo.values()[0].get('family', '') == 'Unknown':
-                    cpus = SubElement(content, 'CPUS')
-                    SubElement(cpus, 'FAMILYNAME').text  = info[1].replace('(R)', '')
-                    SubElement(cpus, 'MANUFACTURER').text  = info[0].replace('(R)', '')
-                    SubElement(cpus, 'NAME').text  = devname
-                    SubElement(cpus, 'SPEED').text  = processors
+                SubElement(cpus, 'FAMILYNAME').text  = info[1].replace('(R)', '')
+                SubElement(cpus, 'MANUFACTURER').text  = info[0].replace('(R)', '')
+                SubElement(cpus, 'NAME').text  = devname
+                SubElement(cpus, 'SPEED').text  = processors
     if 'hrMemorySize' in mib:
         memory = value.split(' ')[0]
     if 'hrStorageDesc' in mib:
