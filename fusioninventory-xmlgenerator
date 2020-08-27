@@ -1,17 +1,19 @@
 #!/usr/bin/python
 # -*- encoding: utf-8; py-indent-offset: 4 -*-
 #
-# Author: Phillipe Smith <phillipelnx@gmail.com> 
+# Author: Phillipe Smith <phsmithcc@gmail.com>
 # Description: Script to generate a xml file for fusioninventory based on snmpwalk -OQ ... and/or dmidecode file
 #
 
-import sys, os, re
+import sys
+import os
+import re
 from datetime import date, datetime
 from optparse import OptionParser
 
-try:    
+try:
     from lxml.etree import Element, SubElement, Comment, tostring, parse
-except Exception, e:
+except Exception as e:
     sys.exit('ERROR: python-lxml is not installed or not found.')
 
 # Set date and time formated like yyyy-mm-dd hh:mm:ss
@@ -48,7 +50,9 @@ bios       = SubElement(content, 'BIOS')
 hardware   = SubElement(content, 'HARDWARE')
 
 # Define variables to store OID values
-processorn    = 0 
+processors    = ''
+processorn    = 0
+processort    = ''
 ipaddr        = {}
 netmask       = {}
 ifInfo        = {}
@@ -96,7 +100,7 @@ if dmifile:
                 nextline = next(dmifile)
                 while not 'Handle' in nextline:
                     nextline = next(dmifile).strip().replace(' ','')
-                    if '"' in nextline: 
+                    if '"' in nextline:
                         sysinfo.append(nextline.strip('"'))
                 smanufacturer, smodel, sserial, skunumber, uuid = sysinfo[0], sysinfo[2], sysinfo[4], sysinfo[3], sysinfo[1]
             if 'Base Board Information' in line:
@@ -155,7 +159,7 @@ if dmifile:
                             if not nextline in cpuinfo:
                                 cpuinfo.append(nextline)
                             else:
-                                cpusinfo[count] = {} 
+                                cpusinfo[count] = {}
                                 info = [x for x in cpuinfo[1].split(' ') if x is not '']
                                 cpusinfo[count].update({
                                     'manufacturer':  cpuinfo[0],
@@ -167,7 +171,7 @@ if dmifile:
                                 count += 1
         dmifile.close()
 
-# Generate XML BIOS informations 
+# Generate XML BIOS informations
 SubElement(bios, 'ASSETTAG').text = chassettag if chassettag != 'Not Specified' else ''
 SubElement(bios, 'BDATE').text = bdate
 SubElement(bios, 'BMANUFACTURER').text = bmanufacturer
@@ -188,7 +192,7 @@ for line in oidfile:
 
     line  = line.replace('"', '').strip('\n').split('= ')
     mib   = line[0].strip()
-    value = line[1].strip() 
+    value = line[1].strip()
     index = mib.split('.')
 
     #if 'SNMPv2-SMI::enterprises.2620.1.6.13.0' in mib:
@@ -206,23 +210,35 @@ for line in oidfile:
     if 'sysName' in mib:
         name = value
     if 'hrDeviceDescr' in mib:
-        if 'CPU' in value:
-            if len(value.split()) > 7: 
-                devname = ' '.join(value.split()[3:]) 
-            else: 
+        if 'CPU' in value or 'Unknown Processor Type' in value:
+            if len(value.split()) > 7:
+                devname = ' '.join(value.split()[3:])
+            else:
                 devname = ' '.join(value.split()[1:])
-            #devname     = value.split(': ')[1]
+
             info        = [x for x in devname.split(' ') if x != '']
-            processort  = devname
-            processors  = str(int(float(info[-1].replace('GHz','').replace('GH','')) * 1000))
+
             if processorn == 0:
                 processorn += 1
-            if not dmifile or cpusinfo.values()[0].get('family', '') == 'Unknown':
+
+            if 'Unknown Processor Type' in value:
+                processors = value
+                processort  = 'Unknown'
                 cpus = SubElement(content, 'CPUS')
-                SubElement(cpus, 'FAMILYNAME').text  = info[1].replace('(R)', '')
-                SubElement(cpus, 'MANUFACTURER').text  = info[0].replace('(R)', '')
-                SubElement(cpus, 'NAME').text  = devname
-                SubElement(cpus, 'SPEED').text  = processors
+                SubElement(cpus, 'FAMILYNAME').text  = 'Unknown'
+                SubElement(cpus, 'MANUFACTURER').text  = 'Unknown'
+                SubElement(cpus, 'NAME').text  = processors
+                SubElement(cpus, 'SPEED').text  = 'Unknown'
+            else:
+                processors  = str(int(float(info[-1].replace('GHz','').replace('GH','')) * 1000))
+                processort  = devname
+
+                if not dmifile or cpusinfo.values()[0].get('family', '') == 'Unknown':
+                    cpus = SubElement(content, 'CPUS')
+                    SubElement(cpus, 'FAMILYNAME').text  = info[1].replace('(R)', '')
+                    SubElement(cpus, 'MANUFACTURER').text  = info[0].replace('(R)', '')
+                    SubElement(cpus, 'NAME').text  = devname
+                    SubElement(cpus, 'SPEED').text  = processors
     if 'hrMemorySize' in mib:
         memory = value.split(' ')[0]
     if 'hrStorageDesc' in mib:
@@ -270,7 +286,7 @@ for line in oidfile:
             ipaddr[index] = mib.split('ipAdEntIfIndex.')[1]
         ifInfo[index].update({'ipaddr': ipaddr[index]})
     if 'ipAdEntNetMask' in mib and not 'No Such Object available' in value:
-        ipaddr = mib.split('ipAdEntNetMask.')[1]        
+        ipaddr = mib.split('ipAdEntNetMask.')[1]
         key = [ key for key,items in ifInfo.iteritems() if items.get('ipaddr') != None and ipaddr in items.get('ipaddr') ][0]
         if key in netmask:
             netmask[key] += ', ' + value
@@ -283,22 +299,22 @@ for line in oidfile:
     if 'ifPhysAddress' in mib:
         key   = index[1]
         value =  value.split(':')
-        
+
         for i in range(len(value)):
             if len(value[i]) == 1:
                 value[i] = '0' + value[i]
 
         ifInfo[key].update({'macaddr': ':'.join(value)})
-    if 'ifSpeed' in mib: 
+    if 'ifSpeed' in mib:
         key = index[1]
         ifInfo[key].update({'speed': value})
-    if 'ifOperStatus' in mib: 
+    if 'ifOperStatus' in mib:
         key = index[1]
         ifInfo[key].update({'status': value})
     if 'hrSWInstalledName' in mib:
         key    = index[1]
         swname = value
-        hrSWInstalled.append(swname) 
+        hrSWInstalled.append(swname)
 
 # Generate XML HARDWARE information
 SubElement(hardware, 'ARCHNAME')
@@ -306,7 +322,7 @@ SubElement(hardware, 'CHASSIS_TYPE').text = chtype
 SubElement(hardware, 'CHECKSUM')
 SubElement(hardware, 'DATELASTLOGGEDUSER')
 SubElement(hardware, 'DEFAULTGATEWAY')
-SubElement(hardware, 'DESCRIPTION') 
+SubElement(hardware, 'DESCRIPTION')
 SubElement(hardware, 'DNS').text = '10.1.3.46/10.1.3.5'
 SubElement(hardware, 'ETIME')
 SubElement(hardware, 'LASTLOGGEDUSER')
@@ -354,7 +370,7 @@ for info in ifInfo.values():
         info['ipaddr'] = ''
     if not 'netmask' in info:
         info['netmask'] = ''
-   
+
     networks = SubElement(content, 'NETWORKS')
     SubElement(networks, 'DESCRIPTION').text = info['descr']
     if info['descr'] == 'eth0': SubElement(hardware, 'IPADDR').text = info['ipaddr']
@@ -390,7 +406,7 @@ for key, info in hrStorage.iteritems():
             total  = info[2]
             type   = mountpoint[1] if len(mountpoint) > 1 else mountpoint[0]
             volumn = mountpoint[0] if len(mountpoint) > 1 else ''
-            
+
             if type == info[0]:
                 drives = SubElement(content, 'DRIVES')
                 SubElement(drives, 'FILESYSTEM')
@@ -409,7 +425,7 @@ for software in hrSWInstalled:
         if 'SUSE LINUX Products GmbH' in software:
             swname = software[3]
             swver  = '-'.join(software[4:])
-        elif len(software[:-2]) == 3:            
+        elif len(software[:-2]) == 3:
             swname = software[2]
             swver  = '-'.join(software[-2:])
         else:
@@ -418,7 +434,7 @@ for software in hrSWInstalled:
     else:
         fscount  = software.count('-') # Count Field Separator
         software = software.split('-')
-        
+
         if fscount == 6:
             swname = '-'.join(software[0:5])
             swver  = '-'.join(software[6:])
@@ -434,7 +450,7 @@ for software in hrSWInstalled:
         else:
             swname = software[0]
             swver  = '-'.join(software[1:])
-     
+
     softwares = SubElement(content, 'SOFTWARES')
     SubElement(softwares, 'ARCH')
     SubElement(softwares, 'COMMENT')
