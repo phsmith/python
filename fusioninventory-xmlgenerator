@@ -76,7 +76,8 @@ skunumber, smanufacturer, smodel, sserial = '', '', '', ''
 
 if dmifile:
     with open(dmifile) as dmifile:
-        count    = 0
+        count = 0
+        processorn = 0
         nextline = ''
 
         for line in dmifile:
@@ -210,12 +211,11 @@ for line in oidfile:
     if 'sysName' in mib:
         name = value
     if 'hrDeviceDescr' in mib:
-        if processorn == 0:
-            processorn += 1
-
         if 'Unknown Processor Type' in value:
             processors = value
             processort  = 'Unknown'
+            processorn += 1
+
             cpus = SubElement(content, 'CPUS')
             SubElement(cpus, 'FAMILYNAME').text  = 'Unknown'
             SubElement(cpus, 'MANUFACTURER').text  = 'Unknown'
@@ -230,6 +230,7 @@ for line in oidfile:
             info        = [x for x in devname.split(' ') if x != '']
             processort  = devname
             processors  = str(int(float(info[-1].replace('GHz','').replace('GH','')) * 1000))
+            processorn += 1
 
             if not dmifile or cpusinfo.values()[0].get('family', '') == 'Unknown':
                 cpus = SubElement(content, 'CPUS')
